@@ -26,15 +26,35 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+# Identificação de ambiente (Local vs Vercel Serverless)
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if os.path.basename(CURRENT_DIR) == "api":
+    BASE_DIR = os.path.dirname(CURRENT_DIR)
+else:
+    BASE_DIR = CURRENT_DIR
+
+TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+
+IS_VERCEL = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+
+# No Vercel/Lambda apenas a pasta /tmp é gravável
+if IS_VERCEL:
+    TEMP_DOWNLOAD_DIR = "/tmp/temp_downloads"
+else:
+    TEMP_DOWNLOAD_DIR = os.path.join(BASE_DIR, "temp_downloads")
+
+try:
+    os.makedirs(TEMP_DOWNLOAD_DIR, exist_ok=True)
+except Exception as e:
+    pass
+
 # Configurações do Servidor
-app = Flask(__name__, template_folder="templates", static_folder="static")
+app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 CORS(app)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("CafeDownloader")
-
-TEMP_DOWNLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_downloads")
-os.makedirs(TEMP_DOWNLOAD_DIR, exist_ok=True)
 
 
 def cleanup_old_files():
@@ -42,24 +62,26 @@ def cleanup_old_files():
     while True:
         try:
             now = time.time()
-            for filename in os.listdir(TEMP_DOWNLOAD_DIR):
-                filepath = os.path.join(TEMP_DOWNLOAD_DIR, filename)
-                if os.path.isfile(filepath):
-                    # Se o arquivo foi criado há mais de 30 minutos (1800 segundos)
-                    if now - os.path.getmtime(filepath) > 1800:
-                        try:
-                            os.remove(filepath)
-                            logger.info(f"Arquivo temporário antigo removido: {filename}")
-                        except Exception as e:
-                            logger.warning(f"Erro ao remover arquivo temporário: {e}")
+            if os.path.exists(TEMP_DOWNLOAD_DIR):
+                for filename in os.listdir(TEMP_DOWNLOAD_DIR):
+                    filepath = os.path.join(TEMP_DOWNLOAD_DIR, filename)
+                    if os.path.isfile(filepath):
+                        # Se o arquivo foi criado há mais de 30 minutos (1800 segundos)
+                        if now - os.path.getmtime(filepath) > 1800:
+                            try:
+                                os.remove(filepath)
+                                logger.info(f"Arquivo temporário antigo removido: {filename}")
+                            except Exception as e:
+                                logger.warning(f"Erro ao remover arquivo temporário: {e}")
         except Exception as e:
             logger.error(f"Erro na limpeza de arquivos temporários: {e}")
         time.sleep(600)  # roda a cada 10 minutos
 
 
-# Inicia thread de limpeza periódica
-cleanup_thread = threading.Thread(target=cleanup_old_files, daemon=True)
-cleanup_thread.start()
+# Inicia thread de limpeza periódica apenas em ambiente persistente (não-serverless)
+if not IS_VERCEL:
+    cleanup_thread = threading.Thread(target=cleanup_old_files, daemon=True)
+    cleanup_thread.start()
 
 
 def sanitize_filename(name: str) -> str:
