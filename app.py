@@ -7,7 +7,7 @@ import shutil
 import logging
 import threading
 from urllib.parse import urlparse
-from flask import Flask, render_template, request, jsonify, send_file, after_this_request
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory, after_this_request
 from flask_cors import CORS
 
 try:
@@ -50,11 +50,17 @@ except Exception as e:
     pass
 
 # Configurações do Servidor
-app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
+app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR, static_url_path="/static")
 CORS(app)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("CafeDownloader")
+
+
+@app.route("/static/<path:filename>")
+def serve_static(filename):
+    """Garante entrega confiável de arquivos CSS/JS na Vercel e localmente."""
+    return send_from_directory(STATIC_DIR, filename)
 
 
 def cleanup_old_files():
