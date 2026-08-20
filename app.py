@@ -63,6 +63,12 @@ def serve_static(filename):
     return send_from_directory(STATIC_DIR, filename)
 
 
+@app.route("/favicon.ico")
+def favicon():
+    """Entrega o favicon de café diretamente na raiz."""
+    return send_from_directory(STATIC_DIR, "favicon.svg", mimetype="image/svg+xml")
+
+
 def cleanup_old_files():
     """Limpa arquivos temporários com mais de 30 minutos."""
     while True:

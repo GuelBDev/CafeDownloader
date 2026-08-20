@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="cupGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8D6E63"/>
+      <stop offset="100%" stop-color="#3E2723"/>
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E5B869"/>
+      <stop offset="100%" stop-color="#C78838"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Fundo arredondado elegante -->
+  <rect width="64" height="64" rx="16" fill="url(#cupGrad)"/>
+
+  <!-- Vapores de Café -->
+  <path d="M22 16 C20 12, 24 10, 22 6" stroke="#FFE6CA" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.85"/>
+  <path d="M30 15 C28 11, 32 9, 30 5" stroke="#FFE6CA" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.95"/>
+  <path d="M38 16 C36 12, 40 10, 38 6" stroke="#FFE6CA" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.85"/>
+
+  <!-- Xícara de Café -->
+  <path d="M14 22 H46 V38 C46 47 38 52 30 52 C22 52 14 47 14 38 Z" fill="#F5EBE1"/>
+
+  <!-- Asa da Xícara -->
+  <path d="M44 26 H49 C53 26 56 29 56 33 C56 37 53 40 49 40 H44" stroke="#F5EBE1" stroke-width="4.5" stroke-linecap="round" fill="none"/>
+
+  <!-- Café Quente dentro da Xícara -->
+  <path d="M17 24 H43 V27 C43 27 30 30 17 27 Z" fill="url(#goldGrad)"/>
+
+  <!-- Pires de Café -->
+  <path d="M10 56 H50" stroke="url(#goldGrad)" stroke-width="3.5" stroke-linecap="round"/>
+</svg>
