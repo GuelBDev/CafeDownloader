@@ -56,9 +56,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let selectedQuality = '320';
   let isDownloading = false;
 
-  // Inicializa histórico salvo
-  updateHistoryUI();
-
   // ==========================================================================
   // Detecção Dinâmica de Plataforma
   // ==========================================================================
@@ -357,13 +354,25 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==========================================================================
-  // Histórico Local (LocalStorage)
+  // Histórico Local (LocalStorage) com Busca e Filtros
   // ==========================================================================
   const HISTORY_KEY = 'cafe_downloader_history';
+  const historySearchInput = document.getElementById('historySearchInput');
+  const clearHistorySearchBtn = document.getElementById('clearHistorySearchBtn');
+  const historyPlatformFilter = document.getElementById('historyPlatformFilter');
+  const historyFormatFilter = document.getElementById('historyFormatFilter');
+  const historyDateFilter = document.getElementById('historyDateFilter');
+  const historyResultsCount = document.getElementById('historyResultsCount');
+  const resetHistoryFiltersBtn = document.getElementById('resetHistoryFiltersBtn');
 
   function getHistory() {
     try {
-      return JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+      const items = JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+      // Garante que itens antigos tenham timestamp
+      return items.map(item => ({
+        ...item,
+        timestamp: item.timestamp || Date.now()
+      }));
     } catch {
       return [];
     }
@@ -371,19 +380,73 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function saveToHistory(item) {
     const list = getHistory();
-    // Adiciona no início, sem duplicar seguidos
+    const now = new Date();
+    const completeItem = {
+      ...item,
+      timestamp: Date.now(),
+      dateFormatted: now.toLocaleDateString('pt-BR'),
+      timeFormatted: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    // Remove item idêntico se já existir para trazer ao topo
     const filtered = list.filter(i => !(i.url === item.url && i.format === item.format));
-    filtered.unshift(item);
-    // Limita aos 20 mais recentes
-    if (filtered.length > 20) filtered.pop();
+    filtered.unshift(completeItem);
+
+    // Salva até 50 itens
+    if (filtered.length > 50) filtered.pop();
     localStorage.setItem(HISTORY_KEY, JSON.stringify(filtered));
     updateHistoryUI();
   }
 
+  function getFilteredHistory() {
+    const rawList = getHistory();
+    const query = (historySearchInput ? historySearchInput.value : '').trim().toLowerCase();
+    const selectedPlat = historyPlatformFilter ? historyPlatformFilter.value : 'all';
+    const selectedFmt = historyFormatFilter ? historyFormatFilter.value : 'all';
+    const selectedDate = historyDateFilter ? historyDateFilter.value : 'newest';
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+    // 1. Filtragem por busca de texto (título, autor ou url)
+    let filtered = rawList.filter(item => {
+      if (!query) return true;
+      const titleMatch = (item.title || '').toLowerCase().includes(query);
+      const authorMatch = (item.author || '').toLowerCase().includes(query);
+      const urlMatch = (item.url || '').toLowerCase().includes(query);
+      return titleMatch || authorMatch || urlMatch;
+    });
+
+    // 2. Filtragem por Plataforma / Site
+    if (selectedPlat !== 'all') {
+      filtered = filtered.filter(item => (item.platform || '').toLowerCase() === selectedPlat);
+    }
+
+    // 3. Filtragem por Formato / Arquivo
+    if (selectedFmt !== 'all') {
+      filtered = filtered.filter(item => (item.format || '').toLowerCase() === selectedFmt);
+    }
+
+    // 4. Filtragem e Ordenação por Data
+    if (selectedDate === 'today') {
+      filtered = filtered.filter(item => (item.timestamp || 0) >= todayStart);
+      filtered.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    } else if (selectedDate === 'oldest') {
+      filtered.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    } else {
+      // newest
+      filtered.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    }
+
+    return { filtered, total: rawList.length };
+  }
+
   function updateHistoryUI() {
-    const list = getHistory();
-    if (list.length > 0) {
-      historyBadge.textContent = list.length;
+    const { filtered, total } = getFilteredHistory();
+
+    // Atualiza badge do header
+    if (total > 0) {
+      historyBadge.textContent = total;
       historyBadge.classList.remove('hidden');
     } else {
       historyBadge.classList.add('hidden');
@@ -391,35 +454,101 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!historyListContainer) return;
 
-    if (list.length === 0) {
+    // Atualiza botão de limpar busca
+    const hasSearch = historySearchInput && historySearchInput.value.trim().length > 0;
+    if (clearHistorySearchBtn) {
+      clearHistorySearchBtn.classList.toggle('hidden', !hasSearch);
+    }
+
+    // Verifica se algum filtro está ativo
+    const isFiltered = hasSearch || 
+      (historyPlatformFilter && historyPlatformFilter.value !== 'all') ||
+      (historyFormatFilter && historyFormatFilter.value !== 'all') ||
+      (historyDateFilter && historyDateFilter.value !== 'newest');
+
+    if (resetHistoryFiltersBtn) {
+      resetHistoryFiltersBtn.classList.toggle('hidden', !isFiltered);
+    }
+
+    // Atualiza contador de resultados
+    if (historyResultsCount) {
+      if (total === 0) {
+        historyResultsCount.textContent = 'Nenhum download gravado';
+      } else if (isFiltered) {
+        historyResultsCount.textContent = `Exibindo ${filtered.length} de ${total} downloads`;
+      } else {
+        historyResultsCount.textContent = `${total} download${total > 1 ? 's' : ''} no histórico`;
+      }
+    }
+
+    // Estado de lista vazia
+    if (total === 0) {
       historyListContainer.innerHTML = `
         <div class="empty-history">
           <i class="fa-solid fa-mug-saucer"></i>
           <p>Nenhum download recente ainda.</p>
-          <small>Seus downloads aparecerão aqui nesta sessão.</small>
+          <small>Seus downloads aparecerão aqui após baixar.</small>
         </div>
       `;
       return;
     }
 
-    historyListContainer.innerHTML = list.map(item => `
-      <div class="history-item">
-        <img src="${item.thumbnail || 'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=100&q=70'}" alt="Capa" class="history-thumb" />
-        <div class="history-details">
-          <div class="history-title" title="${item.title}">${item.title}</div>
-          <div class="history-meta">
-            <span class="history-badge">${item.format.toUpperCase()}</span>
-            <span>${item.quality ? (item.format === 'mp3' ? item.quality + 'k' : item.quality + 'p') : ''}</span>
-            <span>• ${item.date || ''}</span>
+    if (filtered.length === 0) {
+      historyListContainer.innerHTML = `
+        <div class="empty-history">
+          <i class="fa-solid fa-filter-circle-xmark"></i>
+          <p>Nenhum resultado para estes filtros.</p>
+          <small>Tente alterar o termo pesquisado ou os filtros acima.</small>
+        </div>
+      `;
+      return;
+    }
+
+    const platformIcons = {
+      youtube: 'fa-brands fa-youtube yt-color',
+      instagram: 'fa-brands fa-instagram ig-color',
+      tiktok: 'fa-brands fa-tiktok tt-color',
+      facebook: 'fa-brands fa-facebook fb-color',
+      twitter: 'fa-brands fa-x-twitter tw-color'
+    };
+
+    historyListContainer.innerHTML = filtered.map((item, idx) => {
+      const platIcon = platformIcons[item.platform] || 'fa-solid fa-play';
+      const platLabel = item.platform === 'twitter' 
+        ? 'Twitter / X' 
+        : ((item.platform || 'Link').charAt(0).toUpperCase() + (item.platform || '').slice(1));
+      
+      const dateDisplay = item.timeFormatted 
+        ? `${item.dateFormatted || ''} às ${item.timeFormatted}`
+        : (item.date || '');
+
+      return `
+        <div class="history-item">
+          <img src="${item.thumbnail || 'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=100&q=70'}" alt="Capa" class="history-thumb" />
+          <div class="history-details">
+            <div class="history-title" title="${item.title || 'Sem título'}">${item.title || 'Sem título'}</div>
+            <div class="history-meta">
+              <span class="history-badge">${(item.format || 'MP3').toUpperCase()}</span>
+              <span class="history-platform-badge"><i class="${platIcon}"></i> ${platLabel}</span>
+              <span>• ${dateDisplay}</span>
+            </div>
+          </div>
+          <div class="history-actions">
+            <button class="history-action-btn re-download-btn" data-url="${item.url}" title="Recarregar este link">
+              <i class="fa-solid fa-arrow-rotate-right"></i>
+            </button>
+            <button class="history-action-btn copy-url-btn" data-url="${item.url}" title="Copiar link original">
+              <i class="fa-regular fa-copy"></i>
+            </button>
+            <button class="history-action-btn delete-btn delete-item-btn" data-url="${item.url}" data-format="${item.format}" title="Remover do histórico">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
           </div>
         </div>
-        <button class="action-btn re-download-btn" data-url="${item.url}" title="Recarregar link">
-          <i class="fa-solid fa-arrow-rotate-right"></i>
-        </button>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
-    // Listener para botões de recarregar link do histórico
+    // Listener para recarregar link
     historyListContainer.querySelectorAll('.re-download-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const url = btn.dataset.url;
@@ -429,6 +558,66 @@ document.addEventListener('DOMContentLoaded', () => {
         highlightPlatformChip(detectPlatform(url));
         fetchMediaInfo(url);
       });
+    });
+
+    // Listener para copiar link
+    historyListContainer.querySelectorAll('.copy-url-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const url = btn.dataset.url;
+        try {
+          await navigator.clipboard.writeText(url);
+          showToast('Link copiado para a área de transferência!', 'info');
+        } catch {
+          showToast('Não foi possível copiar o link.', 'error');
+        }
+      });
+    });
+
+    // Listener para deletar item individual
+    historyListContainer.querySelectorAll('.delete-item-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const targetUrl = btn.dataset.url;
+        const targetFmt = btn.dataset.format;
+        const list = getHistory().filter(i => !(i.url === targetUrl && i.format === targetFmt));
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(list));
+        updateHistoryUI();
+        showToast('Item removido do histórico.', 'info');
+      });
+    });
+  }
+
+  // Eventos de Busca e Filtros
+  if (historySearchInput) {
+    historySearchInput.addEventListener('input', () => updateHistoryUI());
+  }
+
+  if (clearHistorySearchBtn) {
+    clearHistorySearchBtn.addEventListener('click', () => {
+      historySearchInput.value = '';
+      historySearchInput.focus();
+      updateHistoryUI();
+    });
+  }
+
+  if (historyPlatformFilter) {
+    historyPlatformFilter.addEventListener('change', () => updateHistoryUI());
+  }
+
+  if (historyFormatFilter) {
+    historyFormatFilter.addEventListener('change', () => updateHistoryUI());
+  }
+
+  if (historyDateFilter) {
+    historyDateFilter.addEventListener('change', () => updateHistoryUI());
+  }
+
+  if (resetHistoryFiltersBtn) {
+    resetHistoryFiltersBtn.addEventListener('click', () => {
+      if (historySearchInput) historySearchInput.value = '';
+      if (historyPlatformFilter) historyPlatformFilter.value = 'all';
+      if (historyFormatFilter) historyFormatFilter.value = 'all';
+      if (historyDateFilter) historyDateFilter.value = 'newest';
+      updateHistoryUI();
     });
   }
 
@@ -449,9 +638,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   clearHistoryBtn.addEventListener('click', () => {
-    localStorage.removeItem(HISTORY_KEY);
-    updateHistoryUI();
-    showToast('Histórico limpo!', 'info');
+    const list = getHistory();
+    if (list.length === 0) return;
+    if (confirm('Tem certeza de que deseja limpar todo o histórico de downloads?')) {
+      localStorage.removeItem(HISTORY_KEY);
+      updateHistoryUI();
+      showToast('Histórico limpo com sucesso!', 'info');
+    }
   });
 
   // ==========================================================================
@@ -480,4 +673,7 @@ document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => toast.remove(), 300);
     }, 3500);
   }
+
+  // Inicializa dados do histórico após todos os elementos e ouvintes estarem prontos
+  updateHistoryUI();
 });

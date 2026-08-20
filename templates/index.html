@@ -319,10 +319,70 @@
   <div id="historyDrawer" class="drawer-overlay hidden">
     <div class="drawer-panel">
       <div class="drawer-header">
-        <h3><i class="fa-solid fa-clock-rotate-left"></i> Histórico Recente</h3>
+        <h3><i class="fa-solid fa-clock-rotate-left"></i> Histórico de Downloads</h3>
         <button id="closeHistoryBtn" class="close-drawer-btn" title="Fechar histórico">
           <i class="fa-solid fa-xmark"></i>
         </button>
+      </div>
+
+      <!-- Filtros e Busca do Histórico -->
+      <div class="drawer-filters-section">
+        <!-- Barra de Pesquisa -->
+        <div class="history-search-wrapper">
+          <i class="fa-solid fa-magnifying-glass search-icon"></i>
+          <input 
+            type="text" 
+            id="historySearchInput" 
+            class="history-search-input" 
+            placeholder="Pesquisar por título, autor ou link..." 
+            autocomplete="off"
+          />
+          <button type="button" id="clearHistorySearchBtn" class="clear-search-btn hidden" title="Limpar busca">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <!-- Grid de Filtros -->
+        <div class="history-filters-grid">
+          <!-- Filtro por Plataforma / Site -->
+          <div class="filter-control">
+            <label for="historyPlatformFilter"><i class="fa-solid fa-globe"></i> Plataforma</label>
+            <select id="historyPlatformFilter" class="history-select">
+              <option value="all">Todas as Redes</option>
+              <option value="youtube">YouTube</option>
+              <option value="instagram">Instagram</option>
+              <option value="tiktok">TikTok</option>
+              <option value="facebook">Facebook</option>
+              <option value="twitter">Twitter / X</option>
+            </select>
+          </div>
+
+          <!-- Filtro por Formato / Arquivo -->
+          <div class="filter-control">
+            <label for="historyFormatFilter"><i class="fa-solid fa-file-audio"></i> Arquivo</label>
+            <select id="historyFormatFilter" class="history-select">
+              <option value="all">Todos (MP3 / MP4)</option>
+              <option value="mp3">Apenas MP3 (Áudio)</option>
+              <option value="mp4">Apenas MP4 (Vídeo)</option>
+            </select>
+          </div>
+
+          <!-- Filtro por Data / Ordenação -->
+          <div class="filter-control filter-control-full">
+            <label for="historyDateFilter"><i class="fa-solid fa-calendar-days"></i> Data / Ordenação</label>
+            <select id="historyDateFilter" class="history-select">
+              <option value="newest">Mais recentes primeiro</option>
+              <option value="oldest">Mais antigos primeiro</option>
+              <option value="today">Apenas baixados hoje</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Meta Informação de Resultados -->
+        <div class="history-results-meta">
+          <span id="historyResultsCount">0 downloads</span>
+          <button type="button" id="resetHistoryFiltersBtn" class="btn-link-subtle hidden">Limpar filtros</button>
+        </div>
       </div>
 
       <div class="drawer-body" id="historyListContainer">
@@ -331,7 +391,7 @@
 
       <div class="drawer-footer">
         <button id="clearHistoryBtn" class="btn btn-secondary-subtle btn-sm">
-          <i class="fa-solid fa-trash-can"></i> Limpar Histórico
+          <i class="fa-solid fa-trash-can"></i> Limpar Todo o Histórico
         </button>
       </div>
     </div>
