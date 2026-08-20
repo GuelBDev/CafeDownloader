@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CaféDownloader ☕ | Baixar MP3 e MP4 (YouTube, Instagram, TikTok, Facebook, Twitter / X)</title>
+  <meta name="description" content="Baixe vídeos e áudios de YouTube, Instagram, Facebook, TikTok e Twitter / X em MP3 e MP4 em alta qualidade com facilidade e rapidez.">
+  
+  <!-- Google Fonts: Plus Jakarta Sans & Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+  <!-- Efeito de Fundo Decorativo -->
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
+
+  <!-- Header / Barra de Navegação -->
+  <header class="site-header">
+    <div class="container header-content">
+      <div class="brand">
+        <div class="brand-icon-wrapper">
+          <i class="fa-solid fa-mug-hot brand-icon"></i>
+          <span class="steam steam-1"></span>
+          <span class="steam steam-2"></span>
+          <span class="steam steam-3"></span>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">Café<span class="brand-accent">Downloader</span></span>
+          <span class="brand-tagline">Sua dose diária de MP3 & MP4</span>
+        </div>
+      </div>
+
+      <nav class="header-nav">
+        <button id="historyToggleBtn" class="btn btn-secondary-subtle" title="Histórico de Downloads">
+          <i class="fa-solid fa-clock-rotate-left"></i>
+          <span class="btn-text">Histórico</span>
+          <span id="historyBadge" class="badge-count hidden">0</span>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Conteúdo Principal -->
+  <main class="main-content container">
+    <!-- Hero Section -->
+    <section class="hero-section">
+      <div class="badge-pill">
+        <i class="fa-solid fa-sparkles"></i> Baixe vídeos e músicas instantaneamente
+      </div>
+      <h1 class="hero-title">
+        Transforme seus vídeos favoritos em <span class="highlight-text">MP3 & MP4</span>
+      </h1>
+      <p class="hero-subtitle">
+        Cole o link de compartilhamento do <strong>YouTube, Instagram, TikTok, Facebook ou Twitter / X</strong> e escolha entre baixar apenas o áudio ou o vídeo completo em alta qualidade.
+      </p>
+
+      <!-- Plataformas Suportadas (Chips com detecção ativa) -->
+      <div class="supported-platforms" id="platformBadges">
+        <div class="platform-chip" data-platform="youtube" id="chip-youtube">
+          <i class="fa-brands fa-youtube platform-icon yt-color"></i>
+          <span>YouTube</span>
+        </div>
+        <div class="platform-chip" data-platform="instagram" id="chip-instagram">
+          <i class="fa-brands fa-instagram platform-icon ig-color"></i>
+          <span>Instagram</span>
+        </div>
+        <div class="platform-chip" data-platform="tiktok" id="chip-tiktok">
+          <i class="fa-brands fa-tiktok platform-icon tt-color"></i>
+          <span>TikTok</span>
+        </div>
+        <div class="platform-chip" data-platform="facebook" id="chip-facebook">
+          <i class="fa-brands fa-facebook platform-icon fb-color"></i>
+          <span>Facebook</span>
+        </div>
+        <div class="platform-chip" data-platform="twitter" id="chip-twitter">
+          <i class="fa-brands fa-x-twitter platform-icon tw-color"></i>
+          <span>Twitter / X</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Input Card Section -->
+    <section class="downloader-card-wrapper">
+      <div class="card downloader-main-card">
+        <form id="urlForm" class="url-input-form" onsubmit="return false;">
+          <div class="input-container">
+            <div class="input-icon">
+              <i class="fa-solid fa-link"></i>
+            </div>
+            <input 
+              type="url" 
+              id="videoUrlInput" 
+              class="url-input" 
+              placeholder="Cole aqui o link do vídeo (ex: https://...)" 
+              autocomplete="off"
+              required
+            />
+            <div class="input-actions">
+              <button type="button" id="pasteBtn" class="action-btn" title="Colar link copiado">
+                <i class="fa-regular fa-paste"></i>
+                <span>Colar</span>
+              </button>
+              <button type="button" id="clearBtn" class="action-btn hidden" title="Limpar campo">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-submit-row">
+            <button type="submit" id="fetchInfoBtn" class="btn btn-primary btn-large">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <span>Buscar Mídia</span>
+            </button>
+          </div>
+        </form>
+
+        <!-- Loading State Indicator -->
+        <div id="loadingState" class="state-container hidden">
+          <div class="coffee-loader">
+            <div class="cup">
+              <div class="coffee-fill"></div>
+              <div class="cup-handle"></div>
+            </div>
+          </div>
+          <p class="loading-message" id="loadingText">Preparando o café e buscando informações...</p>
+        </div>
+
+        <!-- Media Preview & Format Selector Card -->
+        <div id="mediaResultCard" class="media-result-container hidden">
+          <div class="media-preview-header">
+            <div class="thumbnail-wrapper">
+              <img id="mediaThumbnail" src="" alt="Capa do Vídeo" class="thumbnail-img" />
+              <div class="duration-badge" id="mediaDuration">00:00</div>
+              <div class="platform-tag" id="mediaPlatformTag">
+                <i class="fa-solid fa-play"></i> <span id="mediaPlatformName">YouTube</span>
+              </div>
+            </div>
+
+            <div class="media-details">
+              <h2 id="mediaTitle" class="media-title">Título do Vídeo</h2>
+              <div class="media-meta">
+                <span class="meta-author">
+                  <i class="fa-solid fa-user"></i> <span id="mediaAuthor">Canal do Autor</span>
+                </span>
+              </div>
+
+              <!-- Seletor de Tipo: MP3 (Áudio) vs MP4 (Vídeo + Áudio) -->
+              <div class="format-type-selector">
+                <label class="format-tab active" data-format="mp3">
+                  <input type="radio" name="mediaFormat" value="mp3" checked />
+                  <div class="tab-content">
+                    <i class="fa-solid fa-music"></i>
+                    <div>
+                      <strong>MP3</strong>
+                      <small>Áudio Isolado</small>
+                    </div>
+                  </div>
+                </label>
+
+                <label class="format-tab" data-format="mp4">
+                  <input type="radio" name="mediaFormat" value="mp4" />
+                  <div class="tab-content">
+                    <i class="fa-solid fa-video"></i>
+                    <div>
+                      <strong>MP4</strong>
+                      <small>Vídeo com Áudio</small>
+                    </div>
+                  </div>
+                </label>
+              </div>
+
+              <!-- Seletor de Qualidade -->
+              <div class="quality-selector-group">
+                <span class="quality-label">Qualidade desejada:</span>
+                
+                <!-- Qualidades para MP3 -->
+                <div id="mp3QualityOptions" class="quality-chips-row">
+                  <button type="button" class="quality-chip active" data-quality="320">
+                    <span class="quality-val">320 kbps</span>
+                    <span class="quality-badge">Máxima</span>
+                  </button>
+                  <button type="button" class="quality-chip" data-quality="192">
+                    <span class="quality-val">192 kbps</span>
+                    <span class="quality-badge">Padrão</span>
+                  </button>
+                  <button type="button" class="quality-chip" data-quality="128">
+                    <span class="quality-val">128 kbps</span>
+                    <span class="quality-badge">Leve</span>
+                  </button>
+                </div>
+
+                <!-- Qualidades para MP4 -->
+                <div id="mp4QualityOptions" class="quality-chips-row hidden">
+                  <button type="button" class="quality-chip active" data-quality="1080">
+                    <span class="quality-val">1080p</span>
+                    <span class="quality-badge">Full HD</span>
+                  </button>
+                  <button type="button" class="quality-chip" data-quality="720">
+                    <span class="quality-val">720p</span>
+                    <span class="quality-badge">HD</span>
+                  </button>
+                  <button type="button" class="quality-chip" data-quality="480">
+                    <span class="quality-val">480p</span>
+                    <span class="quality-badge">Econômico</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Botão de Download Principal -->
+              <div class="download-action-row">
+                <button type="button" id="downloadBtn" class="btn btn-download btn-large">
+                  <i class="fa-solid fa-download"></i>
+                  <span id="downloadBtnText">Baixar Agora</span>
+                </button>
+              </div>
+
+              <!-- Barra de Progresso do Download -->
+              <div id="downloadProgressBarContainer" class="progress-container hidden">
+                <div class="progress-bar-track">
+                  <div class="progress-bar-fill" id="progressBarFill"></div>
+                </div>
+                <div class="progress-status">
+                  <span id="progressStatusText">Processando conversão...</span>
+                  <span id="progressPercent">☕ Preparando</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Error Card State -->
+        <div id="errorState" class="state-container error-state hidden">
+          <i class="fa-solid fa-circle-exclamation error-icon"></i>
+          <h3 id="errorTitle">Ops! Algo deu errado</h3>
+          <p id="errorMessage">Não foi possível processar o link informado.</p>
+          <button type="button" id="retryBtn" class="btn btn-secondary-subtle">
+            <i class="fa-solid fa-rotate-right"></i> Tentar Novamente
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Seção de Recursos / Vantagens -->
+    <section class="features-section">
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon-box">
+            <i class="fa-solid fa-bolt-lightning"></i>
+          </div>
+          <h3>Conversão Rápida</h3>
+          <p>Processamento direto com extração de alta velocidade e sem perda de fidelidade acústica.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-box">
+            <i class="fa-solid fa-sliders"></i>
+          </div>
+          <h3>Áudio ou Vídeo</h3>
+          <p>Escolha entre extrair somente a trilha em MP3 puro ou o arquivo de vídeo completo em MP4.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-box">
+            <i class="fa-solid fa-shield-halved"></i>
+          </div>
+          <h3>100% Gratuito & Seguro</h3>
+          <p>Sem cadastros, sem pop-ups invasivos e arquivos temporários limpos automaticamente.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon-box">
+            <i class="fa-solid fa-mobile-screen-button"></i>
+          </div>
+          <h3>Multiplataforma</h3>
+          <p>Compatível com computadores, notebooks, tablets e smartphones Android / iOS.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Guia Rápido de Como Usar -->
+    <section class="how-to-section">
+      <div class="card how-to-card">
+        <h2 class="section-title"><i class="fa-solid fa-mug-saucer"></i> Como Baixar em 3 Passos:</h2>
+        <div class="steps-grid">
+          <div class="step-item">
+            <div class="step-number">1</div>
+            <div class="step-info">
+              <h4>Copie o Link</h4>
+              <p>Copie o link de compartilhamento do vídeo no YouTube, Reels do Instagram, TikTok, Facebook ou Twitter / X.</p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-number">2</div>
+            <div class="step-info">
+              <h4>Cole & Escolha o Formato</h4>
+              <p>Cole na barra de pesquisa, clique em Buscar e selecione MP3 (áudio) ou MP4 (vídeo).</p>
+            </div>
+          </div>
+          <div class="step-item">
+            <div class="step-number">3</div>
+            <div class="step-info">
+              <h4>Aproveite seu Arquivo</h4>
+              <p>Clique em "Baixar Agora" e o arquivo será salvo diretamente na pasta de downloads do seu dispositivo.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal / Gaveta de Histórico de Downloads -->
+  <div id="historyDrawer" class="drawer-overlay hidden">
+    <div class="drawer-panel">
+      <div class="drawer-header">
+        <h3><i class="fa-solid fa-clock-rotate-left"></i> Histórico Recente</h3>
+        <button id="closeHistoryBtn" class="close-drawer-btn" title="Fechar histórico">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="drawer-body" id="historyListContainer">
+        <!-- Itens inseridos dinamicamente pelo app.js -->
+      </div>
+
+      <div class="drawer-footer">
+        <button id="clearHistoryBtn" class="btn btn-secondary-subtle btn-sm">
+          <i class="fa-solid fa-trash-can"></i> Limpar Histórico
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Rodapé -->
+  <footer class="site-footer">
+    <div class="container footer-content">
+      <div class="footer-brand">
+        <span>CaféDownloader ☕</span>
+        <p>Desenvolvido com carinho para amantes de boa música e bom café.</p>
+      </div>
+      <div class="footer-disclaimer">
+        <small>Este serviço é destinado para uso pessoal e download de conteúdos de domínio público ou autorizados.</small>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
