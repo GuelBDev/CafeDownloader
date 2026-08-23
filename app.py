@@ -214,7 +214,7 @@ def detect_platform(url: str) -> str:
 
 
 def build_ydl_opts(
-    strategy: str = "primary",
+    strategy: str = "default",
     download: bool = False,
     outtmpl: str | None = None,
     media_format: str = "mp3",
@@ -223,14 +223,14 @@ def build_ydl_opts(
     """Constrói as opções do yt-dlp com estratégia de clientes, JS runtime e headers adequados."""
     # Estratégias de player client para o YouTube
     player_clients_map = {
-        "primary": ["tv", "web", "mweb", "android", "ios"],
-        "mweb_android": ["mweb", "android"],
-        "tv_embedded": ["tv", "web_embedded", "web"],
+        "default": None,  # Padrão nativo do yt-dlp com Node.js runtime (mais estável)
+        "android_vr": ["android_vr", "android"],
         "android_ios": ["android", "ios"],
-        "default": None  # Deixa yt-dlp usar o padrão nativo
+        "tv_embedded": ["tv_embedded", "android"],
+        "web": ["web", "mweb"]
     }
 
-    selected_clients = player_clients_map.get(strategy, ["tv", "web", "mweb", "android", "ios"])
+    selected_clients = player_clients_map.get(strategy, None)
 
     opts = {
         "quiet": True,
@@ -320,7 +320,7 @@ def extract_info_with_fallback(
 ):
     """Executa extração ou download tentando estratégias de fallback caso YouTube bloqueie ou desafie a requisição."""
     is_yt = "youtube.com" in url.lower() or "youtu.be" in url.lower()
-    strategies = ["primary", "default", "mweb_android", "tv_embedded"] if is_yt else ["primary"]
+    strategies = ["default", "android_vr", "android_ios", "tv_embedded"] if is_yt else ["default"]
     last_error = None
 
     for idx, strategy in enumerate(strategies):
@@ -340,8 +340,16 @@ def extract_info_with_fallback(
             err_str = str(e)
             logger.warning(f"Tentativa {idx + 1}/{len(strategies)} ('{strategy}') falhou: {err_str}")
 
-            # Se for erro definitivo como vídeo inexistente ou privado, não adianta tentar outros clientes
-            if any(term in err_str.lower() for term in ["private video", "video unavailable", "does not exist", "removed by the user"]):
+            # Se for erro definitivo como vídeo indisponível, 404 ou privado, interrompe imediatamente
+            err_lower = err_str.lower()
+            if any(term in err_lower for term in [
+                "this video is unavailable",
+                "video unavailable",
+                "does not exist",
+                "private video",
+                "removed by the user",
+                "is not a valid url"
+            ]):
                 raise e
         except Exception as e:
             last_error = e
@@ -356,16 +364,24 @@ def parse_friendly_error(error_msg: str) -> str:
     """Converte mensagens técnicas de erro do yt-dlp em orientações claras para o usuário."""
     err_lower = error_msg.lower()
 
-    if "private video" in err_lower:
+    if "private video" in err_lower or "vídeo privado" in err_lower:
         return "Este vídeo é privado e requer autorização do autor para ser acessado."
-    elif "video unavailable" in err_lower or "does not exist" in err_lower:
+    elif any(term in err_lower for term in [
+        "this video is unavailable",
+        "video unavailable",
+        "does not exist",
+        "not found",
+        "removed by the user",
+        "is not a valid url",
+        "404"
+    ]):
         return "Vídeo indisponível ou excluído. Verifique se o link foi copiado corretamente."
-    elif "sign in to confirm you’re not a bot" in err_lower or "confirm you're not a bot" in err_lower:
-        return "O YouTube solicitou verificação contra robôs para este link. Tente novamente em alguns instantes."
-    elif "sign in" in err_lower or "login" in err_lower:
-        return "A plataforma está exigindo login para acessar este conteúdo específico."
     elif "age" in err_lower and ("restrict" in err_lower or "gate" in err_lower):
         return "Este vídeo possui restrição de idade imposta pela plataforma."
+    elif "sign in to confirm you’re not a bot" in err_lower or "confirm you're not a bot" in err_lower:
+        return "O YouTube bloqueou temporariamente a requisição por suspeita de bot. Dica: Tente novamente em alguns instantes."
+    elif "sign in" in err_lower or "login" in err_lower:
+        return "A plataforma está exigindo login para acessar este conteúdo específico."
     elif "requested format is not available" in err_lower:
         return "O formato selecionado não está disponível para esta mídia. Tente outra opção de qualidade."
     elif "http error 429" in err_lower or "too many requests" in err_lower:
