@@ -31,6 +31,8 @@ temp_downloads/
 *.webm
 *.part
 *.ytdl
+cookies.txt
+yt_cookies.txt
 
 # IDEs & SO
 .vscode/

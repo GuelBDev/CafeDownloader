@@ -46,7 +46,7 @@ else:
 
 try:
     os.makedirs(TEMP_DOWNLOAD_DIR, exist_ok=True)
-except Exception as e:
+except Exception:
     pass
 
 # Configurações do Servidor
@@ -55,6 +55,89 @@ CORS(app)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("CafeDownloader")
+
+
+def get_node_path() -> str | None:
+    """Detecta o executável do Node.js no sistema para resolver desafios JavaScript (EJS)."""
+    # 1. Checa PATH
+    node_on_path = shutil.which("node")
+    if node_on_path:
+        return node_on_path
+
+    # 2. Checa caminhos comuns de instalação no Windows
+    possible_paths = [
+        r"C:\Program Files\nodejs\node.exe",
+        r"C:\Program Files (x86)\nodejs\node.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\node\node.exe"),
+        os.path.expandvars(r"%APPDATA%\npm\node.cmd"),
+    ]
+    for p in possible_paths:
+        if os.path.exists(p):
+            return p
+
+    return None
+
+
+def get_js_runtimes_config() -> dict:
+    """Retorna configuração de runtimes JS para o yt-dlp resolver n-sig e bot challenges."""
+    node_path = get_node_path()
+    if node_path:
+        return {"node": {"path": node_path}}
+    
+    deno_path = shutil.which("deno")
+    if deno_path:
+        return {"deno": {"path": deno_path}}
+    
+    bun_path = shutil.which("bun")
+    if bun_path:
+        return {"bun": {"path": bun_path}}
+    
+    return {}
+
+
+def get_cookie_file() -> str | None:
+    """Detecta arquivo de cookies se configurado via arquivo local ou variável de ambiente."""
+    # 1. Variável de ambiente YTDLP_COOKIES (conteúdo raw ou base64)
+    env_cookies = os.environ.get("YTDLP_COOKIES")
+    if env_cookies:
+        cookies_path = os.path.join(TEMP_DOWNLOAD_DIR, "yt_cookies.txt")
+        try:
+            import base64
+            # Tenta decodificar se for base64
+            try:
+                decoded = base64.b64decode(env_cookies.encode("utf-8")).decode("utf-8")
+                content = decoded
+            except Exception:
+                content = env_cookies
+            with open(cookies_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            return cookies_path
+        except Exception as e:
+            logger.warning(f"Não foi possível salvar cookies da variável de ambiente: {e}")
+
+    # 2. Arquivo cookies.txt no diretório raiz do projeto
+    root_cookies = os.path.join(BASE_DIR, "cookies.txt")
+    if os.path.exists(root_cookies) and os.path.getsize(root_cookies) > 0:
+        return root_cookies
+
+    return None
+
+
+def schedule_file_removal(filepath: str, delay: int = 15):
+    """Remove o arquivo temporário após um atraso para evitar conflitos de lock no Windows (WinError 32)."""
+    def _remove():
+        time.sleep(delay)
+        for _ in range(6):
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    logger.info(f"Arquivo temporário removido com sucesso: {filepath}")
+                break
+            except Exception:
+                time.sleep(3)
+
+    t = threading.Thread(target=_remove, daemon=True)
+    t.start()
 
 
 @app.route("/static/<path:filename>")
@@ -78,7 +161,6 @@ def cleanup_old_files():
                 for filename in os.listdir(TEMP_DOWNLOAD_DIR):
                     filepath = os.path.join(TEMP_DOWNLOAD_DIR, filename)
                     if os.path.isfile(filepath):
-                        # Se o arquivo foi criado há mais de 30 minutos (1800 segundos)
                         if now - os.path.getmtime(filepath) > 1800:
                             try:
                                 os.remove(filepath)
@@ -90,7 +172,6 @@ def cleanup_old_files():
         time.sleep(600)  # roda a cada 10 minutos
 
 
-# Inicia thread de limpeza periódica apenas em ambiente persistente (não-serverless)
 if not IS_VERCEL:
     cleanup_thread = threading.Thread(target=cleanup_old_files, daemon=True)
     cleanup_thread.start()
@@ -132,29 +213,166 @@ def detect_platform(url: str) -> str:
     return "other"
 
 
-def get_base_ydl_opts():
-    """Retorna opções base com suporte a JS Runtime (Node.js) e clientes móveis para evitar 403."""
+def build_ydl_opts(
+    strategy: str = "primary",
+    download: bool = False,
+    outtmpl: str | None = None,
+    media_format: str = "mp3",
+    quality: str = "320"
+) -> dict:
+    """Constrói as opções do yt-dlp com estratégia de clientes, JS runtime e headers adequados."""
+    # Estratégias de player client para o YouTube
+    player_clients_map = {
+        "primary": ["tv", "web", "mweb", "android", "ios"],
+        "mweb_android": ["mweb", "android"],
+        "tv_embedded": ["tv", "web_embedded", "web"],
+        "android_ios": ["android", "ios"],
+        "default": None  # Deixa yt-dlp usar o padrão nativo
+    }
+
+    selected_clients = player_clients_map.get(strategy, ["tv", "web", "mweb", "android", "ios"])
+
     opts = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["ios", "android", "mweb"]
-            },
-            "tiktok": {
-                "app_version": ["current"]
-            }
-        },
-        "js_runtimes": {"node": {}},
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Sec-Fetch-Mode": "navigate",
         }
     }
+
+    # Configuração de extractor_args para YouTube e TikTok
+    extractor_args = {
+        "tiktok": {
+            "app_version": ["current"]
+        }
+    }
+    if selected_clients:
+        extractor_args["youtube"] = {
+            "player_client": selected_clients
+        }
+    opts["extractor_args"] = extractor_args
+
+    # Adiciona JS Runtimes para EJS challenge solving
+    js_runtimes = get_js_runtimes_config()
+    if js_runtimes:
+        opts["js_runtimes"] = js_runtimes
+
+    # Adiciona Cookies se disponíveis
+    cookie_file = get_cookie_file()
+    if cookie_file:
+        opts["cookiefile"] = cookie_file
+
     if os.path.exists(FFMPEG_PATH):
         opts["ffmpeg_location"] = FFMPEG_PATH
+
+    if not download:
+        opts["skip_download"] = True
+        opts["extract_flat"] = False
+        return opts
+
+    # Configurações de Download
+    if outtmpl:
+        opts["outtmpl"] = outtmpl
+
+    if media_format == "mp3":
+        audio_quality = "320" if quality == "320" else ("128" if quality == "128" else "192")
+        opts.update({
+            "format": "bestaudio/best",
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": audio_quality,
+            }],
+        })
+    else:
+        # MP4
+        if quality == "1080":
+            fmt = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best"
+        elif quality == "720":
+            fmt = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo+bestaudio/best"
+        elif quality == "480":
+            fmt = "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]/bestvideo+bestaudio/best"
+        else:
+            fmt = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best"
+
+        opts.update({
+            "format": fmt,
+            "merge_output_format": "mp4",
+        })
+        if os.path.exists(FFMPEG_PATH):
+            opts["postprocessors"] = [{
+                "key": "FFmpegVideoConvertor",
+                "preferedformat": "mp4"
+            }]
+
     return opts
+
+
+def extract_info_with_fallback(
+    url: str,
+    download: bool = False,
+    outtmpl: str | None = None,
+    media_format: str = "mp3",
+    quality: str = "320"
+):
+    """Executa extração ou download tentando estratégias de fallback caso YouTube bloqueie ou desafie a requisição."""
+    is_yt = "youtube.com" in url.lower() or "youtu.be" in url.lower()
+    strategies = ["primary", "default", "mweb_android", "tv_embedded"] if is_yt else ["primary"]
+    last_error = None
+
+    for idx, strategy in enumerate(strategies):
+        try:
+            ydl_opts = build_ydl_opts(
+                strategy=strategy,
+                download=download,
+                outtmpl=outtmpl,
+                media_format=media_format,
+                quality=quality
+            )
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=download)
+                return info
+        except yt_dlp.utils.DownloadError as e:
+            last_error = e
+            err_str = str(e)
+            logger.warning(f"Tentativa {idx + 1}/{len(strategies)} ('{strategy}') falhou: {err_str}")
+
+            # Se for erro definitivo como vídeo inexistente ou privado, não adianta tentar outros clientes
+            if any(term in err_str.lower() for term in ["private video", "video unavailable", "does not exist", "removed by the user"]):
+                raise e
+        except Exception as e:
+            last_error = e
+            logger.warning(f"Erro inesperado na estratégia '{strategy}': {e}")
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("Não foi possível processar o link com as estratégias disponíveis.")
+
+
+def parse_friendly_error(error_msg: str) -> str:
+    """Converte mensagens técnicas de erro do yt-dlp em orientações claras para o usuário."""
+    err_lower = error_msg.lower()
+
+    if "private video" in err_lower:
+        return "Este vídeo é privado e requer autorização do autor para ser acessado."
+    elif "video unavailable" in err_lower or "does not exist" in err_lower:
+        return "Vídeo indisponível ou excluído. Verifique se o link foi copiado corretamente."
+    elif "sign in to confirm you’re not a bot" in err_lower or "confirm you're not a bot" in err_lower:
+        return "O YouTube solicitou verificação contra robôs para este link. Tente novamente em alguns instantes."
+    elif "sign in" in err_lower or "login" in err_lower:
+        return "A plataforma está exigindo login para acessar este conteúdo específico."
+    elif "age" in err_lower and ("restrict" in err_lower or "gate" in err_lower):
+        return "Este vídeo possui restrição de idade imposta pela plataforma."
+    elif "requested format is not available" in err_lower:
+        return "O formato selecionado não está disponível para esta mídia. Tente outra opção de qualidade."
+    elif "http error 429" in err_lower or "too many requests" in err_lower:
+        return "Muitas requisições simultâneas. Aguarde alguns segundos antes de tentar novamente."
+    elif "copyright" in err_lower or "blocked" in err_lower:
+        return "Este conteúdo foi bloqueado por reivindicação de direitos autorais ou restrição geográfica."
+    return "Não foi possível carregar as informações do vídeo. Verifique se o link está correto e público."
 
 
 @app.route("/")
@@ -164,10 +382,15 @@ def index():
 
 @app.route("/api/health", methods=["GET"])
 def health_check():
+    node_path = get_node_path()
+    cookie_file = get_cookie_file()
     return jsonify({
         "status": "healthy",
         "ffmpeg_available": bool(FFMPEG_PATH and os.path.exists(FFMPEG_PATH)),
         "ffmpeg_path": FFMPEG_PATH,
+        "node_available": bool(node_path),
+        "node_path": node_path,
+        "cookies_active": bool(cookie_file),
         "ytdlp_version": yt_dlp.version.__version__
     })
 
@@ -185,55 +408,41 @@ def get_video_info():
     if not parsed.scheme or not parsed.netloc:
         return jsonify({"success": False, "error": "Link inválido. Certifique-se de incluir http:// ou https://"}), 400
 
-    ydl_opts = get_base_ydl_opts()
-    ydl_opts.update({
-        "skip_download": True,
-        "extract_flat": False,
-    })
-
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            if not info:
-                return jsonify({"success": False, "error": "Não foi possível obter dados para este vídeo."}), 404
+        info = extract_info_with_fallback(url, download=False)
+        if not info:
+            return jsonify({"success": False, "error": "Não foi possível obter dados para este vídeo."}), 404
 
-            # Trata caso de playlist retornada como primeiro item
-            if "entries" in info and info["entries"]:
-                info = info["entries"][0]
+        # Trata caso de playlist retornada como primeiro item
+        if "entries" in info and info["entries"]:
+            info = info["entries"][0]
 
-            title = info.get("title") or "Vídeo sem título"
-            uploader = info.get("uploader") or info.get("channel") or info.get("creator") or "Autor desconhecido"
-            duration = info.get("duration")
-            thumbnail = info.get("thumbnail") or ""
-            video_id = info.get("id") or str(int(time.time()))
-            platform = detect_platform(url)
+        title = info.get("title") or "Vídeo sem título"
+        uploader = info.get("uploader") or info.get("channel") or info.get("creator") or "Autor desconhecido"
+        duration = info.get("duration")
+        thumbnail = info.get("thumbnail") or ""
+        video_id = info.get("id") or str(int(time.time()))
+        platform = detect_platform(url)
 
-            return jsonify({
-                "success": True,
-                "data": {
-                    "id": video_id,
-                    "title": title,
-                    "author": uploader,
-                    "duration": duration,
-                    "duration_formatted": format_duration(duration),
-                    "thumbnail": thumbnail,
-                    "platform": platform,
-                    "original_url": url
-                }
-            })
+        return jsonify({
+            "success": True,
+            "data": {
+                "id": video_id,
+                "title": title,
+                "author": uploader,
+                "duration": duration,
+                "duration_formatted": format_duration(duration),
+                "thumbnail": thumbnail,
+                "platform": platform,
+                "original_url": url
+            }
+        })
 
     except yt_dlp.utils.DownloadError as e:
         error_msg = str(e)
         logger.error(f"Erro de extração yt-dlp: {error_msg}")
-        if "Private video" in error_msg:
-            msg = "Este vídeo é privado ou requer autenticação."
-        elif "Video unavailable" in error_msg:
-            msg = "Vídeo indisponível ou excluído."
-        elif "Sign in" in error_msg:
-            msg = "A plataforma está exigindo login para acessar este conteúdo."
-        else:
-            msg = "Não foi possível carregar as informações do vídeo. Verifique se o link está correto."
-        return jsonify({"success": False, "error": msg}), 400
+        friendly_msg = parse_friendly_error(error_msg)
+        return jsonify({"success": False, "error": friendly_msg}), 400
     except Exception as e:
         logger.exception("Erro inesperado em /api/info")
         return jsonify({"success": False, "error": f"Erro interno ao processar link: {str(e)}"}), 500
@@ -241,7 +450,7 @@ def get_video_info():
 
 @app.route("/api/download", methods=["POST"])
 def download_media():
-    """Baixa e converte a mídia para MP3 ou MP4."""
+    """Baixa e converte a mídia para MP3 ou MP4 com estratégia de resiliência e entrega segura."""
     data = request.get_json() or {}
     url = data.get("url", "").strip()
     media_format = data.get("format", "mp3").lower()  # 'mp3' ou 'mp4'
@@ -253,91 +462,56 @@ def download_media():
     unique_id = f"{int(time.time() * 1000)}_{os.getpid()}"
     output_template = os.path.join(TEMP_DOWNLOAD_DIR, f"{unique_id}_%(title).100s.%(ext)s")
 
-    ydl_opts = get_base_ydl_opts()
-    ydl_opts["outtmpl"] = output_template
-
-    if media_format == "mp3":
-        # Configuração de extração para MP3 puro
-        audio_quality = "320" if quality == "320" else ("128" if quality == "128" else "192")
-        ydl_opts.update({
-            "format": "bestaudio/best",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": audio_quality,
-            }],
-        })
-    else:
-        # Configuração para MP4 com áudio integrado
-        if quality == "1080":
-            fmt = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best"
-        elif quality == "720":
-            fmt = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo+bestaudio/best"
-        elif quality == "480":
-            fmt = "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]/bestvideo+bestaudio/best"
-        else:
-            fmt = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best"
-
-        ydl_opts.update({
-            "format": fmt,
-            "merge_output_format": "mp4",
-        })
-        if os.path.exists(FFMPEG_PATH):
-            ydl_opts["postprocessors"] = [{
-                "key": "FFmpegVideoConvertor",
-                "preferedformat": "mp4"
-            }]
-
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            logger.info(f"Iniciando download ({media_format.upper()} - {quality}): {url}")
-            info = ydl.extract_info(url, download=True)
-            if "entries" in info and info["entries"]:
-                info = info["entries"][0]
+        logger.info(f"Iniciando download ({media_format.upper()} - {quality}): {url}")
+        info = extract_info_with_fallback(
+            url=url,
+            download=True,
+            outtmpl=output_template,
+            media_format=media_format,
+            quality=quality
+        )
 
-            title = info.get("title") or "download"
-            safe_title = sanitize_filename(title)
-            final_ext = "mp3" if media_format == "mp3" else "mp4"
+        if "entries" in info and info["entries"]:
+            info = info["entries"][0]
 
-            # Localiza o arquivo gerado correspondente ao unique_id
-            pattern = os.path.join(TEMP_DOWNLOAD_DIR, f"{unique_id}_*")
-            matching_files = glob.glob(pattern)
+        title = info.get("title") or "download"
+        safe_title = sanitize_filename(title)
+        final_ext = "mp3" if media_format == "mp3" else "mp4"
 
-            if not matching_files:
-                # Tenta buscar por qualquer arquivo com o prefixo
-                matching_files = [
-                    os.path.join(TEMP_DOWNLOAD_DIR, f)
-                    for f in os.listdir(TEMP_DOWNLOAD_DIR)
-                    if f.startswith(unique_id)
-                ]
+        # Localiza o arquivo gerado correspondente ao unique_id
+        pattern = os.path.join(TEMP_DOWNLOAD_DIR, f"{unique_id}_*")
+        matching_files = glob.glob(pattern)
 
-            if not matching_files:
-                raise FileNotFoundError("Arquivo baixado não foi encontrado no servidor.")
+        if not matching_files:
+            matching_files = [
+                os.path.join(TEMP_DOWNLOAD_DIR, f)
+                for f in os.listdir(TEMP_DOWNLOAD_DIR)
+                if f.startswith(unique_id)
+            ]
 
-            target_file = matching_files[0]
-            download_filename = f"{safe_title}.{final_ext}"
-            mimetype = "audio/mpeg" if media_format == "mp3" else "video/mp4"
+        if not matching_files:
+            raise FileNotFoundError("Arquivo baixado não foi encontrado no servidor.")
 
-            @after_this_request
-            def remove_file(response):
-                try:
-                    if os.path.exists(target_file):
-                        os.remove(target_file)
-                        logger.info(f"Arquivo temporário entregue e removido com sucesso: {target_file}")
-                except Exception as ex:
-                    logger.warning(f"Erro ao remover arquivo temporário após envio: {ex}")
-                return response
+        target_file = matching_files[0]
+        download_filename = f"{safe_title}.{final_ext}"
+        mimetype = "audio/mpeg" if media_format == "mp3" else "video/mp4"
 
-            return send_file(
-                target_file,
-                as_attachment=True,
-                download_name=download_filename,
-                mimetype=mimetype
-            )
+        # Agenda a remoção limpa do arquivo após a entrega para evitar WinError 32
+        schedule_file_removal(target_file, delay=15)
+
+        return send_file(
+            target_file,
+            as_attachment=True,
+            download_name=download_filename,
+            mimetype=mimetype
+        )
 
     except yt_dlp.utils.DownloadError as e:
-        logger.error(f"Erro durante download do yt-dlp: {e}")
-        return jsonify({"success": False, "error": f"Erro ao baixar mídia: {str(e)}"}), 400
+        error_msg = str(e)
+        logger.error(f"Erro durante download do yt-dlp: {error_msg}")
+        friendly_msg = parse_friendly_error(error_msg)
+        return jsonify({"success": False, "error": friendly_msg}), 400
     except Exception as e:
         logger.exception("Erro interno durante o download")
         return jsonify({"success": False, "error": f"Falha no processamento do arquivo: {str(e)}"}), 500

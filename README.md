@@ -13,7 +13,9 @@ Uma aplicação web completa, moderna e elegante com tema **Café (Latte, Mocha,
 - 📋 **Colar Inteligente**: Botão de colar instantâneo a partir da área de transferência com detecção automática da plataforma.
 - 📜 **Histórico de Downloads**: Salva os downloads recentes no navegador para acesso rápido.
 - ⚡ **Sem Instalação Complexa de FFmpeg**: Utiliza `imageio-ffmpeg` para fornecer os binários de conversão automaticamente no Windows.
-- 🧹 **Limpeza Automática**: Arquivos temporários gerados são limpos automaticamente após o envio ao usuário.
+- 🚀 **Bypass Inteligente Anti-Bot & JS Runtime**: Detecta automaticamente Node.js no sistema para resolver desafios JavaScript e mitigar bloqueios do YouTube.
+- 🍪 **Suporte Opcional a Cookies**: Permite uso de `cookies.txt` ou variável `YTDLP_COOKIES` para servidores em nuvem ou conexões restritas.
+- 🧹 **Limpeza Automática Segura**: Arquivos temporários gerados são limpos automaticamente com tratamento especial para Windows.
 
 ---
 
