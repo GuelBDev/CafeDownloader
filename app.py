@@ -6,8 +6,9 @@ import time
 import shutil
 import logging
 import threading
-from urllib.parse import urlparse
-from flask import Flask, render_template, request, jsonify, send_file, send_from_directory, after_this_request
+import requests
+from urllib.parse import urlparse, parse_qs
+from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 
 try:
@@ -59,12 +60,10 @@ logger = logging.getLogger("CafeDownloader")
 
 def get_node_path() -> str | None:
     """Detecta o executável do Node.js no sistema para resolver desafios JavaScript (EJS)."""
-    # 1. Checa PATH
     node_on_path = shutil.which("node")
     if node_on_path:
         return node_on_path
 
-    # 2. Checa caminhos comuns de instalação no Windows
     possible_paths = [
         r"C:\Program Files\nodejs\node.exe",
         r"C:\Program Files (x86)\nodejs\node.exe",
@@ -97,13 +96,11 @@ def get_js_runtimes_config() -> dict:
 
 def get_cookie_file() -> str | None:
     """Detecta arquivo de cookies se configurado via arquivo local ou variável de ambiente."""
-    # 1. Variável de ambiente YTDLP_COOKIES (conteúdo raw ou base64)
     env_cookies = os.environ.get("YTDLP_COOKIES")
     if env_cookies:
         cookies_path = os.path.join(TEMP_DOWNLOAD_DIR, "yt_cookies.txt")
         try:
             import base64
-            # Tenta decodificar se for base64
             try:
                 decoded = base64.b64decode(env_cookies.encode("utf-8")).decode("utf-8")
                 content = decoded
@@ -115,7 +112,6 @@ def get_cookie_file() -> str | None:
         except Exception as e:
             logger.warning(f"Não foi possível salvar cookies da variável de ambiente: {e}")
 
-    # 2. Arquivo cookies.txt no diretório raiz do projeto
     root_cookies = os.path.join(BASE_DIR, "cookies.txt")
     if os.path.exists(root_cookies) and os.path.getsize(root_cookies) > 0:
         return root_cookies
@@ -169,7 +165,7 @@ def cleanup_old_files():
                                 logger.warning(f"Erro ao remover arquivo temporário: {e}")
         except Exception as e:
             logger.error(f"Erro na limpeza de arquivos temporários: {e}")
-        time.sleep(600)  # roda a cada 10 minutos
+        time.sleep(600)
 
 
 if not IS_VERCEL:
@@ -213,6 +209,42 @@ def detect_platform(url: str) -> str:
     return "other"
 
 
+def normalize_youtube_url(url: str) -> str:
+    """Normaliza variantes de URLs do YouTube (shorts, youtu.be, mobile) para URL canônica."""
+    if "youtube.com" not in url.lower() and "youtu.be" not in url.lower():
+        return url
+    
+    # Extrai o ID do vídeo de 11 caracteres
+    patterns = [
+        r'(?:v=|\/)([0-9A-Za-z_-]{11})(?:[&?]|$)',
+        r'(?:embed\/|v\/|shorts\/|live\/)([0-9A-Za-z_-]{11})',
+        r'youtu\.be\/([0-9A-Za-z_-]{11})'
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            video_id = match.group(1)
+            return f"https://www.youtube.com/watch?v={video_id}"
+    return url
+
+
+def check_youtube_oembed(url: str):
+    """Consulta o endpoint oEmbed oficial do YouTube para validação instantânea."""
+    try:
+        norm_url = normalize_youtube_url(url)
+        r = requests.get(f"https://www.youtube.com/oembed?url={norm_url}&format=json", timeout=5)
+        if r.status_code == 200:
+            return True, r.json()
+        elif r.status_code == 404:
+            return False, "Vídeo não encontrado no YouTube (Erro 404). Verifique se o link foi copiado corretamente."
+        elif r.status_code in (401, 403):
+            return False, "Este vídeo é privado ou requer autorização do autor no YouTube."
+        return False, f"Status HTTP {r.status_code} recebido do YouTube."
+    except Exception as e:
+        logger.warning(f"Falha na consulta oEmbed do YouTube: {e}")
+        return None, None
+
+
 def build_ydl_opts(
     strategy: str = "default",
     download: bool = False,
@@ -221,9 +253,8 @@ def build_ydl_opts(
     quality: str = "320"
 ) -> dict:
     """Constrói as opções do yt-dlp com estratégia de clientes, JS runtime e headers adequados."""
-    # Estratégias de player client para o YouTube
     player_clients_map = {
-        "default": None,  # Padrão nativo do yt-dlp com Node.js runtime (mais estável)
+        "default": None,  # Padrão nativo do yt-dlp com Node.js runtime
         "android_vr": ["android_vr", "android"],
         "android_ios": ["android", "ios"],
         "tv_embedded": ["tv_embedded", "android"],
@@ -243,7 +274,6 @@ def build_ydl_opts(
         }
     }
 
-    # Configuração de extractor_args para YouTube e TikTok
     extractor_args = {
         "tiktok": {
             "app_version": ["current"]
@@ -255,12 +285,10 @@ def build_ydl_opts(
         }
     opts["extractor_args"] = extractor_args
 
-    # Adiciona JS Runtimes para EJS challenge solving
     js_runtimes = get_js_runtimes_config()
     if js_runtimes:
         opts["js_runtimes"] = js_runtimes
 
-    # Adiciona Cookies se disponíveis
     cookie_file = get_cookie_file()
     if cookie_file:
         opts["cookiefile"] = cookie_file
@@ -319,7 +347,8 @@ def extract_info_with_fallback(
     quality: str = "320"
 ):
     """Executa extração ou download tentando estratégias de fallback caso YouTube bloqueie ou desafie a requisição."""
-    is_yt = "youtube.com" in url.lower() or "youtu.be" in url.lower()
+    clean_url = normalize_youtube_url(url)
+    is_yt = "youtube.com" in clean_url.lower() or "youtu.be" in clean_url.lower()
     strategies = ["default", "android_vr", "android_ios", "tv_embedded"] if is_yt else ["default"]
     last_error = None
 
@@ -333,14 +362,13 @@ def extract_info_with_fallback(
                 quality=quality
             )
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=download)
+                info = ydl.extract_info(clean_url, download=download)
                 return info
         except yt_dlp.utils.DownloadError as e:
             last_error = e
             err_str = str(e)
             logger.warning(f"Tentativa {idx + 1}/{len(strategies)} ('{strategy}') falhou: {err_str}")
 
-            # Se for erro definitivo como vídeo indisponível, 404 ou privado, interrompe imediatamente
             err_lower = err_str.lower()
             if any(term in err_lower for term in [
                 "this video is unavailable",
@@ -424,12 +452,19 @@ def get_video_info():
     if not parsed.scheme or not parsed.netloc:
         return jsonify({"success": False, "error": "Link inválido. Certifique-se de incluir http:// ou https://"}), 400
 
+    platform = detect_platform(url)
+
+    # Verificação rápida prévia para o YouTube via oEmbed oficial
+    if platform == "youtube":
+        ok, oembed_data = check_youtube_oembed(url)
+        if ok is False and isinstance(oembed_data, str):
+            return jsonify({"success": False, "error": oembed_data}), 404
+
     try:
         info = extract_info_with_fallback(url, download=False)
         if not info:
             return jsonify({"success": False, "error": "Não foi possível obter dados para este vídeo."}), 404
 
-        # Trata caso de playlist retornada como primeiro item
         if "entries" in info and info["entries"]:
             info = info["entries"][0]
 
@@ -438,7 +473,6 @@ def get_video_info():
         duration = info.get("duration")
         thumbnail = info.get("thumbnail") or ""
         video_id = info.get("id") or str(int(time.time()))
-        platform = detect_platform(url)
 
         return jsonify({
             "success": True,
@@ -474,6 +508,12 @@ def download_media():
 
     if not url:
         return jsonify({"success": False, "error": "URL obrigatória."}), 400
+
+    platform = detect_platform(url)
+    if platform == "youtube":
+        ok, oembed_data = check_youtube_oembed(url)
+        if ok is False and isinstance(oembed_data, str):
+            return jsonify({"success": False, "error": oembed_data}), 404
 
     unique_id = f"{int(time.time() * 1000)}_{os.getpid()}"
     output_template = os.path.join(TEMP_DOWNLOAD_DIR, f"{unique_id}_%(title).100s.%(ext)s")
