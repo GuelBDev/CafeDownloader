@@ -441,27 +441,47 @@ def health_check():
 
 @app.route("/api/info", methods=["POST"])
 def get_video_info():
-    """Extrai informações e metadados rápidos do link fornecido."""
+    """Extrai informações e metadados rápidos do link fornecido ou busca por nome de música."""
     data = request.get_json() or {}
     url = data.get("url", "").strip()
 
     if not url:
-        return jsonify({"success": False, "error": "Por favor, insira um link válido."}), 400
+        return jsonify({"success": False, "error": "Por favor, insira um link ou nome de música."}), 400
+
+    # Auto-adiciona https:// caso o usuário tenha colado sem protocolo
+    if not url.startswith("http://") and not url.startswith("https://") and not url.startswith("ytsearch"):
+        low = url.lower()
+        if (
+            low.startswith("youtube.com")
+            or low.startswith("youtu.be")
+            or low.startswith("instagram.com")
+            or low.startswith("tiktok.com")
+            or low.startswith("facebook.com")
+            or low.startswith("fb.watch")
+            or low.startswith("fb.com")
+            or low.startswith("twitter.com")
+            or low.startswith("x.com")
+        ):
+            url = f"https://{url}"
 
     parsed = urlparse(url)
-    if not parsed.scheme or not parsed.netloc:
-        return jsonify({"success": False, "error": "Link inválido. Certifique-se de incluir http:// ou https://"}), 400
+    is_search = not bool(parsed.scheme and parsed.netloc)
 
-    platform = detect_platform(url)
+    if is_search:
+        target_query = f"ytsearch1:{url}"
+        platform = "youtube"
+    else:
+        target_query = url
+        platform = detect_platform(url)
 
-    # Verificação rápida prévia para o YouTube via oEmbed oficial
-    if platform == "youtube":
-        ok, oembed_data = check_youtube_oembed(url)
-        if ok is False and isinstance(oembed_data, str):
-            return jsonify({"success": False, "error": oembed_data}), 404
+        # Verificação rápida prévia para o YouTube via oEmbed oficial
+        if platform == "youtube":
+            ok, oembed_data = check_youtube_oembed(url)
+            if ok is False and isinstance(oembed_data, str):
+                return jsonify({"success": False, "error": oembed_data}), 404
 
     try:
-        info = extract_info_with_fallback(url, download=False)
+        info = extract_info_with_fallback(target_query, download=False)
         if not info:
             return jsonify({"success": False, "error": "Não foi possível obter dados para este vídeo."}), 404
 
@@ -473,6 +493,7 @@ def get_video_info():
         duration = info.get("duration")
         thumbnail = info.get("thumbnail") or ""
         video_id = info.get("id") or str(int(time.time()))
+        final_url = info.get("webpage_url") or url
 
         return jsonify({
             "success": True,
@@ -484,7 +505,7 @@ def get_video_info():
                 "duration_formatted": format_duration(duration),
                 "thumbnail": thumbnail,
                 "platform": platform,
-                "original_url": url
+                "original_url": final_url
             }
         })
 
