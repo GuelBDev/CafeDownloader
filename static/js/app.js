@@ -303,10 +303,19 @@ document.addEventListener('DOMContentLoaded', () => {
       // Obter nome do arquivo do cabeçalho Content-Disposition se existir
       const disposition = response.headers.get('Content-Disposition');
       let filename = `${currentMediaData.title || 'download'}.${selectedFormat}`;
-      if (disposition && disposition.includes('filename=')) {
-        const matches = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-        if (matches != null && matches[1]) {
-          filename = matches[1].replace(/['"]/g, '');
+      if (disposition) {
+        const utf8Match = disposition.match(/filename\*=UTF-8''([^;\n]+)/i);
+        if (utf8Match && utf8Match[1]) {
+          try {
+            filename = decodeURIComponent(utf8Match[1]);
+          } catch (e) {
+            filename = utf8Match[1];
+          }
+        } else {
+          const standardMatch = disposition.match(/filename=["']?([^"';\n]+)["']?/i);
+          if (standardMatch && standardMatch[1]) {
+            filename = standardMatch[1].trim();
+          }
         }
       }
 
@@ -339,7 +348,8 @@ document.addEventListener('DOMContentLoaded', () => {
       progressPercent.textContent = '100%';
     } catch (err) {
       showToast(err.message, 'error');
-      progressStatusText.textContent = 'Erro ao baixar.';
+      progressStatusText.textContent = `Erro: ${err.message}`;
+      progressPercent.textContent = 'Falha';
     } finally {
       clearInterval(phraseInterval);
       isDownloading = false;

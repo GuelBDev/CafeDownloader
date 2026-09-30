@@ -11,14 +11,6 @@ from urllib.parse import urlparse, parse_qs
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 
-try:
-    import imageio_ffmpeg
-    FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
-except Exception:
-    FFMPEG_PATH = "ffmpeg"
-
-import yt_dlp
-
 # Configuração de encoding para terminal Windows
 if sys.platform == "win32":
     try:
@@ -26,6 +18,18 @@ if sys.platform == "win32":
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
         pass
+
+# Detecção e configuração do executável FFmpeg
+try:
+    import imageio_ffmpeg
+    FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+    ffmpeg_dir = os.path.dirname(FFMPEG_PATH)
+    if ffmpeg_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+except Exception:
+    FFMPEG_PATH = "ffmpeg"
+
+import yt_dlp
 
 # Identificação de ambiente (Local vs Vercel Serverless)
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -52,7 +56,7 @@ except Exception:
 
 # Configurações do Servidor
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR, static_url_path="/static")
-CORS(app)
+CORS(app, expose_headers=["Content-Disposition"])
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("CafeDownloader")
@@ -94,6 +98,15 @@ def get_js_runtimes_config() -> dict:
     return {}
 
 
+def get_impersonate_target():
+    """Retorna target de personificação de browser usando curl_cffi para contornar proteções anti-bot."""
+    try:
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+        return ImpersonateTarget.from_str("chrome")
+    except Exception:
+        return None
+
+
 def get_cookie_file() -> str | None:
     """Detecta arquivo de cookies se configurado via arquivo local ou variável de ambiente."""
     env_cookies = os.environ.get("YTDLP_COOKIES")
@@ -119,8 +132,8 @@ def get_cookie_file() -> str | None:
     return None
 
 
-def schedule_file_removal(filepath: str, delay: int = 15):
-    """Remove o arquivo temporário após um atraso para evitar conflitos de lock no Windows (WinError 32)."""
+def schedule_file_removal(filepath: str, delay: int = 300):
+    """Remove o arquivo temporário após um atraso seguro para evitar conflitos de lock no Windows (WinError 32)."""
     def _remove():
         time.sleep(delay)
         for _ in range(6):
@@ -130,7 +143,7 @@ def schedule_file_removal(filepath: str, delay: int = 15):
                     logger.info(f"Arquivo temporário removido com sucesso: {filepath}")
                 break
             except Exception:
-                time.sleep(3)
+                time.sleep(5)
 
     t = threading.Thread(target=_remove, daemon=True)
     t.start()
@@ -229,24 +242,24 @@ def normalize_youtube_url(url: str) -> str:
 
 
 def check_youtube_oembed(url: str):
-    """Consulta o endpoint oEmbed oficial do YouTube para validação instantânea."""
+    """Consulta o endpoint oEmbed oficial do YouTube para validação rápida de links não existentes."""
     try:
         norm_url = normalize_youtube_url(url)
-        r = requests.get(f"https://www.youtube.com/oembed?url={norm_url}&format=json", timeout=5)
+        r = requests.get(f"https://www.youtube.com/oembed?url={norm_url}&format=json", timeout=4)
         if r.status_code == 200:
             return True, r.json()
         elif r.status_code == 404:
             return False, "Vídeo não encontrado no YouTube (Erro 404). Verifique se o link foi copiado corretamente."
-        elif r.status_code in (401, 403):
-            return False, "Este vídeo é privado ou requer autorização do autor no YouTube."
-        return False, f"Status HTTP {r.status_code} recebido do YouTube."
+        # Status 401 ou 403 pode significar apenas que embeds em iframe foram desativados pelo canal.
+        # Nesses casos, permitimos que o yt-dlp continue sem bloquear indevidamente.
+        return None, None
     except Exception as e:
         logger.warning(f"Falha na consulta oEmbed do YouTube: {e}")
         return None, None
 
 
 def build_ydl_opts(
-    strategy: str = "default",
+    strategy: str = "android_web",
     download: bool = False,
     outtmpl: str | None = None,
     media_format: str = "mp3",
@@ -254,11 +267,11 @@ def build_ydl_opts(
 ) -> dict:
     """Constrói as opções do yt-dlp com estratégia de clientes, JS runtime e headers adequados."""
     player_clients_map = {
-        "default": None,  # Padrão nativo do yt-dlp com Node.js runtime
-        "android_vr": ["android_vr", "android"],
-        "android_ios": ["android", "ios"],
-        "tv_embedded": ["tv_embedded", "android"],
-        "web": ["web", "mweb"]
+        "android_web": ["android", "web"],
+        "visionos_web": ["visionos", "web"],
+        "web_mweb": ["web", "mweb"],
+        "android": ["android"],
+        "default": None,
     }
 
     selected_clients = player_clients_map.get(strategy, None)
@@ -274,26 +287,34 @@ def build_ydl_opts(
         }
     }
 
+    # Contorno de bloqueio anti-bot com curl_cffi para TikTok, Instagram, Twitter, etc.
+    target = get_impersonate_target()
+    if target:
+        opts["impersonate"] = target
+
     extractor_args = {
         "tiktok": {
             "app_version": ["current"]
+        },
+        "youtube": {
+            "skip": ["translated_subs"]
         }
     }
     if selected_clients:
-        extractor_args["youtube"] = {
-            "player_client": selected_clients
-        }
+        extractor_args["youtube"]["player_client"] = selected_clients
     opts["extractor_args"] = extractor_args
 
+    # JS Runtime com download de solvers EJS (essencial para n-sig e bot-checks do YouTube)
     js_runtimes = get_js_runtimes_config()
     if js_runtimes:
         opts["js_runtimes"] = js_runtimes
+        opts["remote_components"] = ["ejs:github"]
 
     cookie_file = get_cookie_file()
     if cookie_file:
         opts["cookiefile"] = cookie_file
 
-    if os.path.exists(FFMPEG_PATH):
+    if FFMPEG_PATH and os.path.exists(FFMPEG_PATH):
         opts["ffmpeg_location"] = FFMPEG_PATH
 
     if not download:
@@ -316,21 +337,40 @@ def build_ydl_opts(
             }],
         })
     else:
-        # MP4
+        # MP4: seleção flexível de vídeo e áudio com mesclagem e fallback contínuo
         if quality == "1080":
-            fmt = "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/bestvideo+bestaudio/best"
+            fmt = (
+                "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/"
+                "bestvideo[height<=1080]+bestaudio/"
+                "best[height<=1080]/"
+                "bestvideo+bestaudio/best"
+            )
         elif quality == "720":
-            fmt = "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/bestvideo+bestaudio/best"
+            fmt = (
+                "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/"
+                "bestvideo[height<=720]+bestaudio/"
+                "best[height<=720]/"
+                "bestvideo+bestaudio/best"
+            )
         elif quality == "480":
-            fmt = "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]/bestvideo+bestaudio/best"
+            fmt = (
+                "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/"
+                "bestvideo[height<=480]+bestaudio/"
+                "best[height<=480]/"
+                "bestvideo+bestaudio/best"
+            )
         else:
-            fmt = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best"
+            fmt = (
+                "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
+                "bestvideo+bestaudio/"
+                "best"
+            )
 
         opts.update({
             "format": fmt,
             "merge_output_format": "mp4",
         })
-        if os.path.exists(FFMPEG_PATH):
+        if FFMPEG_PATH and os.path.exists(FFMPEG_PATH):
             opts["postprocessors"] = [{
                 "key": "FFmpegVideoConvertor",
                 "preferedformat": "mp4"
@@ -349,7 +389,7 @@ def extract_info_with_fallback(
     """Executa extração ou download tentando estratégias de fallback caso YouTube bloqueie ou desafie a requisição."""
     clean_url = normalize_youtube_url(url)
     is_yt = "youtube.com" in clean_url.lower() or "youtu.be" in clean_url.lower()
-    strategies = ["default", "android_vr", "android_ios", "tv_embedded"] if is_yt else ["default"]
+    strategies = ["android_web", "visionos_web", "web_mweb", "android", "default"] if is_yt else ["default"]
     last_error = None
 
     for idx, strategy in enumerate(strategies):
@@ -428,12 +468,14 @@ def index():
 def health_check():
     node_path = get_node_path()
     cookie_file = get_cookie_file()
+    impersonate_target = get_impersonate_target()
     return jsonify({
         "status": "healthy",
         "ffmpeg_available": bool(FFMPEG_PATH and os.path.exists(FFMPEG_PATH)),
         "ffmpeg_path": FFMPEG_PATH,
         "node_available": bool(node_path),
         "node_path": node_path,
+        "impersonate_available": bool(impersonate_target),
         "cookies_active": bool(cookie_file),
         "ytdlp_version": yt_dlp.version.__version__
     })
@@ -474,7 +516,7 @@ def get_video_info():
         target_query = url
         platform = detect_platform(url)
 
-        # Verificação rápida prévia para o YouTube via oEmbed oficial
+        # Verificação rápida se o link do YouTube realmente não existe (404)
         if platform == "youtube":
             ok, oembed_data = check_youtube_oembed(url)
             if ok is False and isinstance(oembed_data, str):
@@ -570,12 +612,19 @@ def download_media():
         if not matching_files:
             raise FileNotFoundError("Arquivo baixado não foi encontrado no servidor.")
 
-        target_file = matching_files[0]
+        # Prioriza o arquivo final convertido com a extensão correta
+        target_candidates = [f for f in matching_files if f.lower().endswith(f".{final_ext}")]
+        if target_candidates:
+            target_file = target_candidates[0]
+        else:
+            valid_candidates = [f for f in matching_files if not f.endswith((".part", ".ytdl", ".temp"))]
+            target_file = valid_candidates[0] if valid_candidates else matching_files[0]
+
         download_filename = f"{safe_title}.{final_ext}"
         mimetype = "audio/mpeg" if media_format == "mp3" else "video/mp4"
 
-        # Agenda a remoção limpa do arquivo após a entrega para evitar WinError 32
-        schedule_file_removal(target_file, delay=15)
+        # Agenda a remoção com delay seguro (300s = 5min) para evitar WinError 32 durante downloads grandes
+        schedule_file_removal(target_file, delay=300)
 
         return send_file(
             target_file,
